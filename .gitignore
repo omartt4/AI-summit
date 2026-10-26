@@ -1,5 +1,9 @@
-.env/
-.venv/
+.env
 __pycache__/
 *.py[cod]
-
+chroma_db/
+.chroma-build-*/
+.chroma_db-backup/
+chat_history.json
+.pytest_cache/
+.ruff_cache/
