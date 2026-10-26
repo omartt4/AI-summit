@@ -1,314 +1,219 @@
-# Local PDF RAG Chatbot
+# Local PDF Assistant
 
-A private, local chatbot for asking questions about PDF documents. The
-application runs on Windows, uses Ollama for local AI inference, stores its
-index in ChromaDB, and provides a Streamlit browser interface.
+## What is this application?
 
-No OpenAI key, Gemini key, paid API, or cloud document storage is required.
+Local PDF Assistant is a private chatbot that lets you ask questions about your
+own PDF documents.
 
-## What the system does
+It runs on your computer and uses local AI models through Ollama. Your
+documents, questions, answers, and search index stay on your machine.
 
-The application:
+You do not need:
 
-- Accepts PDF files from the `pdfs\` folder or the browser upload control.
-- Extracts text page by page.
-- Splits text into overlapping chunks.
-- Creates local embeddings with `nomic-embed-text`.
-- Stores embeddings and source metadata in ChromaDB.
-- Searches with both semantic retrieval and BM25 keyword retrieval.
-- Combines results with Reciprocal Rank Fusion (RRF).
-- Generates a grounded answer with `qwen2.5:1.5b`.
-- Displays source filenames and page numbers with the answer.
-- Keeps chat history locally in `chat_history.json`.
+- OpenAI or Gemini API keys
+- A paid cloud service
+- An internet connection after the software and models are installed
 
-## Requirements
+## What can it do?
 
-Install the following software before running the application:
-
-- Windows
-- Python 3.14 or newer
-- [uv](https://docs.astral.sh/uv/)
-- [Ollama](https://ollama.com/)
-- Ollama model `nomic-embed-text`
-- Ollama model `qwen2.5:1.5b`
-
-Ollama must be available at:
-
-```text
-http://localhost:11434
-```
+- Upload PDF files from the browser.
+- Save uploaded files automatically to the local `pdfs\` folder.
+- Search across multiple PDF documents.
+- Answer questions using the document content.
+- Show the source filename and page number for each answer.
+- Create multiple chat conversations.
+- Save chat history locally.
+- Refresh the document library whenever PDFs are added or changed.
+- Keep the previous search index if an indexing operation fails.
+- Work with both exact keywords and related concepts.
 
 ## Installation
 
-Open PowerShell in the project root:
+### 1. Install Python
 
-```powershell
-uv sync
-```
+Install Python 3.14 or newer on Windows.
 
-Download the local models:
+### 2. Install `uv`
+
+Install `uv` by following the instructions at:
+
+<https://docs.astral.sh/uv/>
+
+### 3. Install Ollama
+
+Install Ollama from:
+
+<https://ollama.com/>
+
+After installation, make sure Ollama is running, then download the two required
+models in PowerShell:
 
 ```powershell
 ollama pull nomic-embed-text
 ollama pull qwen2.5:1.5b
 ```
 
-Create the local environment file:
+These models are used locally:
+
+- `nomic-embed-text` searches the document content.
+- `qwen2.5:1.5b` writes the chatbot response.
+
+### 4. Install the project dependencies
+
+Open PowerShell in the project folder:
+
+```powershell
+uv sync
+```
+
+Create the local configuration file:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-The active application reads all runtime values from `.env` through
-`src\chatbot\config.py`. Do not commit `.env`; it is intentionally ignored
-by Git.
+The `.env` file is private local configuration and must not be uploaded or
+committed.
 
-Important settings include:
+## Start the application
 
-```env
-PDF_DIR=pdfs
-CHROMA_DB_DIR=chroma_db
-COLLECTION_NAME=pdf_documents
-OLLAMA_HOST=http://localhost:11434
-EMBEDDING_MODEL=nomic-embed-text
-LLM_MODEL=qwen2.5:1.5b
-CHUNK_SIZE=1000
-CHUNK_OVERLAP=250
-EMBED_BATCH_SIZE=32
-UPSERT_BATCH_SIZE=128
-DENSE_CANDIDATES=10
-BM25_CANDIDATES=10
-FINAL_TOP_K=3
-RRF_K=60
-LLM_TEMPERATURE=0.2
-LLM_MAX_TOKENS=1000
-MAX_CONTEXT_CHARS=12000
-```
+### First time, or after changing PDFs
 
-All of these settings are required. If a value is missing or invalid, the
-application stops with a configuration error instead of silently using a
-different hardcoded value.
-
-## Run the application
-
-### First run or after PDF changes
-
-Place PDFs in:
+You can place PDF files manually in:
 
 ```text
 pdfs\
 ```
 
-Or upload a PDF through the Streamlit sidebar. Uploaded files are saved
-directly to the configured `PDF_DIR`.
+Or upload them from the application sidebar.
 
-Build or refresh the index:
+Build the document search index:
 
 ```powershell
 uv run python scripts\index_pdfs.py
 ```
 
-Run indexing whenever you:
+Run this command when you:
 
-- Add a PDF.
+- Add a new PDF.
 - Replace or edit a PDF.
 - Remove a PDF.
-- Change chunking or embedding settings.
+- Want to refresh the document library.
 
-### Start the browser chatbot
+### Open the chatbot
+
+Start the browser application:
 
 ```powershell
 uv run streamlit run app.py
 ```
 
-The browser application uses the existing ChromaDB index. You do not need to
-run another search script.
+Streamlit opens a local browser page. If it does not open automatically, copy
+the local URL shown in PowerShell into your browser.
 
-## System pipeline
+## How to use the application
 
-The following diagrams show the actual application flow.
+1. Open the Streamlit page.
+2. Upload a PDF from the sidebar, or place one in `pdfs\`.
+3. Click **Index PDFs** after adding or changing documents.
+4. Wait for the success message.
+5. Type a question in the chat box.
+6. Review the answer and expand **Sources** to see the supporting pages.
+7. Click **New chat** when you want a separate conversation.
 
-### Indexing flow
+The upload control saves each selected PDF directly into the configured PDF
+folder. Selecting a file does not update the search index automatically; click
+**Index PDFs** after uploading.
 
-```mermaid
-flowchart TD
-    A[PDF files in pdfs folder] --> B[Discover PDF files]
-    B --> C[Extract page text with PyMuPDF]
-    C --> D{Extraction successful?}
-    D -- No --> E[Fallback to pypdf]
-    D -- Yes --> F[Normalize text]
-    E --> F
-    F --> G[Split into overlapping chunks]
-    G --> H[Create stable chunk IDs and metadata]
-    H --> I[Generate embeddings with Ollama]
-    I --> J[Build temporary ChromaDB index]
-    J --> K[Validate record count and metadata]
-    K --> L{Replacement valid?}
-    L -- No --> M[Delete temporary index]
-    M --> N[Keep existing index]
-    L -- Yes --> O[Copy replacement into active database]
-    O --> P[Validate active database]
-    P --> Q{Activation valid?}
-    Q -- No --> R[Restore previous index]
-    Q -- Yes --> S[New index is ready]
+## What happens when you ask a question?
+
+The assistant searches the indexed PDFs, finds the most relevant passages, and
+uses those passages to create an answer. It combines meaning-based search with
+keyword search so it can find both related explanations and exact terms.
+
+The answer includes source information whenever relevant passages are found.
+If the PDFs do not contain enough information, the assistant is instructed to
+say so instead of inventing an answer.
+
+Text inside a PDF is treated as document content, not as instructions that can
+control the assistant.
+
+## Files and local data
+
+| Item | Purpose |
+|---|---|
+| `app.py` | Browser chatbot |
+| `scripts\index_pdfs.py` | Creates or refreshes the document index |
+| `pdfs\` | Your PDF documents |
+| `chroma_db\` | Local search index |
+| `chat_history.json` | Saved conversations |
+| `.env` | Private local settings |
+| `.env.example` | Safe settings template |
+
+The PDF files, search index, chat history, and `.env` are ignored by Git
+because they may contain private information.
+
+## Common problems
+
+### Ollama connection error
+
+Make sure Ollama is running and confirm that the models are installed:
+
+```powershell
+ollama list
 ```
 
-The indexer uses a temporary database and rollback behavior. A failed
-extraction, embedding request, validation step, or activation does not replace
-the last working index.
-
-### Question-answering flow
-
-```mermaid
-flowchart TD
-    A[User asks a question in Streamlit] --> B[Load active ChromaDB collection]
-    B --> C[Load complete collection for BM25]
-    A --> D[Create query embedding with Ollama]
-    D --> E[Dense semantic search in ChromaDB]
-    C --> F[BM25 keyword search]
-    E --> G[Reciprocal Rank Fusion]
-    F --> G
-    G --> H[Select final top-K passages]
-    H --> I[Build grounded prompt with source metadata]
-    I --> J[Generate answer with qwen2.5:1.5b]
-    J --> K[Display answer and citations]
-    K --> L[Save conversation to chat_history.json]
-```
-
-PDF content is treated as untrusted evidence. Instructions found inside a PDF
-cannot override the chatbot's system behavior. If the retrieved evidence is
-insufficient, the answer should state that the documents do not contain enough
-information.
-
-### Application architecture
-
-```mermaid
-flowchart LR
-    UI[app.py<br/>Streamlit UI] --> CFG[config.py<br/>.env loader and validator]
-    UI --> PIPE[pipeline.py<br/>orchestration]
-    INDEX[scripts/index_pdfs.py] --> PIPE
-    PIPE --> LOAD[pdf_loader.py]
-    LOAD --> CHUNK[chunking.py]
-    PIPE --> STORE[vector_store.py]
-    STORE --> CHROMA[(ChromaDB)]
-    PIPE --> RETRIEVE[retriever.py]
-    RETRIEVE --> BM25[sparse_retriever.py]
-    RETRIEVE --> CHROMA
-    PIPE --> EMBED[embeddings.py]
-    EMBED --> OLLAMA[Ollama]
-    PIPE --> GENERATE[generator.py]
-    GENERATE --> OLLAMA
-```
-
-## Features
-
-### Local privacy
-
-- Local Ollama inference.
-- Local PDF files.
-- Local ChromaDB vector storage.
-- Local chat history.
-- No paid cloud AI dependency.
-
-### PDF ingestion
-
-- Multiple PDF support.
-- Page-by-page extraction.
-- PyMuPDF as the primary extractor.
-- pypdf fallback for unreadable files.
-- Warnings for empty pages and scanned PDFs.
-- Configurable chunk size and overlap.
-- Stable chunk identifiers.
-- Filename, page, and document metadata.
-- Batch embedding generation.
-- Safe index replacement and rollback.
-
-### Hybrid retrieval
-
-- Dense semantic search through ChromaDB.
-- BM25 keyword search across the complete collection.
-- RRF result fusion.
-- Configurable candidate counts.
-- Configurable final result count.
-- Source metadata preserved for citations.
-
-### Streamlit interface
-
-- Browser-based chat.
-- PDF upload from the sidebar.
-- Uploads saved directly to `pdfs\`.
-- Manual indexing button.
-- Multiple local chat sessions.
-- Persistent chat history.
-- Expandable source passages.
-- Source filename and page display.
-- Indexed passage count.
-- Clear indexing and Ollama error messages.
-
-## Project structure
+The list should contain:
 
 ```text
-AI-summit/
-├── app.py                         # Streamlit browser application
-├── scripts/
-│   └── index_pdfs.py              # PDF indexing command
-├── src/chatbot/
-│   ├── config.py                  # .env loading and validation
-│   ├── pdf_loader.py              # PDF extraction
-│   ├── chunking.py                # Normalization and chunking
-│   ├── embeddings.py              # Ollama embeddings
-│   ├── vector_store.py            # ChromaDB lifecycle and rollback
-│   ├── sparse_retriever.py        # BM25 retrieval
-│   ├── retriever.py               # Dense retrieval and RRF
-│   ├── generator.py               # Grounded answer generation
-│   └── pipeline.py                # Workflow orchestration
-├── pdfs/                          # Local PDF input directory
-├── chroma_db/                     # Local generated vector database
-├── .env.example                   # Safe configuration template
-├── pyproject.toml                 # Project dependencies
-└── uv.lock                        # Locked uv dependency versions
+nomic-embed-text
+qwen2.5:1.5b
 ```
 
-## Verification commands
+### No answers are found
 
-Run linting:
-
-```powershell
-uv run ruff check .
-```
-
-Run Python syntax validation:
-
-```powershell
-uv run python -m compileall app.py scripts src
-```
-
-Run the complete workflow:
+Run the indexer before asking questions:
 
 ```powershell
 uv run python scripts\index_pdfs.py
+```
+
+Then restart the browser application if necessary:
+
+```powershell
 uv run streamlit run app.py
 ```
 
-## Data and limitations
+### PDF text cannot be found
 
-| Data | Location | Git status |
-|---|---|---|
-| PDF input files | `pdfs\` | Ignored |
-| Vector index | `chroma_db\` | Ignored |
-| Chat history | `chat_history.json` | Ignored |
-| Private configuration | `.env` | Ignored |
+Some PDFs are scanned images rather than text documents. Those files need OCR
+before the assistant can search their content.
 
-Scanned PDFs containing only images require OCR. PyMuPDF and pypdf can extract
-embedded text, but they cannot reliably recover text from image-only pages.
-The small local language model may produce weaker answers for complex
-questions. Larger PDF collections require more memory and longer indexing
-times.
+### Indexing fails
 
-To reset only the generated vector index, stop Streamlit first and run:
+Close other running copies of Streamlit or the indexer and try again. The
+application is designed to preserve the previous working index when a refresh
+fails.
+
+## Limitations
+
+- Image-only scanned PDFs need OCR.
+- Answer quality depends on the local language model.
+- Very large PDF collections require more memory and indexing time.
+- The application answers from indexed document content; it is not a general
+  internet search engine.
+
+## Reset the local search index
+
+To delete only the generated search index, stop the chatbot first and run:
 
 ```powershell
 Remove-Item .\chroma_db -Recurse -Force
 ```
 
-Keep the PDFs if you want to rebuild the index.
+Your PDFs and chat history are not deleted. Run the indexer again to rebuild
+the search index:
+
+```powershell
+uv run python scripts\index_pdfs.py
+```
